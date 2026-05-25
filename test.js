@@ -208,3 +208,26 @@ test('extract file with no data element defaults to empty buffer', async t => {
   t.is(files[0].data.length, 0);
 });
 
+test('skip hardlink entries', async t => {
+  const xml = xar('<file><name>link</name><type>hardlink</type></file>');
+  const files = await decompressPkg()(await makeXar(xml));
+  t.deepEqual(files, []);
+});
+
+test('skip symlink entries', async t => {
+  const xml = xar('<file><name>shortcut</name><type>symlink</type></file>');
+  const files = await decompressPkg()(await makeXar(xml));
+  t.deepEqual(files, []);
+});
+
+test('skip hardlink siblings but keep regular files in same directory', async t => {
+  const content = Buffer.from('keep');
+  const xml = xar(`
+    <file><name>link</name><type>hardlink</type></file>
+    <file><name>real.txt</name><type>file</type>${dataXml(content.length)}</file>
+  `);
+  const files = await decompressPkg()(await makeXar(xml, content));
+  t.is(files.length, 1);
+  t.is(files[0].path, 'real.txt');
+});
+

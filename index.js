@@ -116,6 +116,11 @@ async function processNode(node, heapStart, input, parentPath) {
     return [entry, ...children];
   }
 
+  // Skip hardlink, symlink, fifo, character/block special, etc.
+  if (type !== undefined && type !== 'file') {
+    return [];
+  }
+
   const data = await getFileData(node, heapStart, input);
   if (data === null) {
     return [];
