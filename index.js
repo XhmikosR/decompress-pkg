@@ -77,7 +77,9 @@ async function getFileData(node, heapStart, input) {
 }
 
 async function processNode(node, heapStart, input, parentPath) {
-  const name = node.name?.[0] ?? '';
+  const rawName = node.name?.[0] ?? '';
+  // Split on both separators so "..\\evil" can't bypass the .. filter on Windows.
+  const name = rawName.split(/[/\\]/).filter(p => p && p !== '..').join('/');
   const currentPath = path.posix.join(parentPath, name);
   const type = node.type?.[0];
 

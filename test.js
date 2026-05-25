@@ -157,6 +157,21 @@ test('use default 0o755 mode for invalid mode string', async t => {
   t.is(files[0].mode, 0o755);
 });
 
+test('sanitize path traversal in entry name', async t => {
+  const content = Buffer.from('x');
+  const xml = xar(`<file><name>../evil.txt</name><type>file</type>${dataXml(content.length)}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, content));
+  t.is(files[0].path, 'evil.txt');
+});
+
+test('sanitize Windows-style path traversal in entry name', async t => {
+  const content = Buffer.from('x');
+  const name = String.raw`..\..\Windows\evil.exe`;
+  const xml = xar(`<file><name>${name}</name><type>file</type>${dataXml(content.length)}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, content));
+  t.is(files[0].path, 'Windows/evil.exe');
+});
+
 test('extract file with no name element defaults to empty path', async t => {
   const content = Buffer.from('x');
   const xml = xar(`<file><type>file</type>${dataXml(content.length)}</file>`);
