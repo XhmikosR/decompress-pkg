@@ -1,0 +1,62 @@
+{
+  "name": "@xhmikosr/decompress-pkg",
+  "version": "0.1.0",
+  "description": "macOS .pkg (XAR) archive decompress plugin",
+  "keywords": [
+    "decompress",
+    "decompressplugin",
+    "extract",
+    "pkg",
+    "xar",
+    "macos",
+    "installer"
+  ],
+  "homepage": "https://github.com/XhmikosR/decompress-pkg#readme",
+  "bugs": {
+    "url": "https://github.com/XhmikosR/decompress-pkg/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XhmikosR/decompress-pkg.git"
+  },
+  "license": "MIT",
+  "author": "XhmikosR <xhmikosr@gmail.com>",
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "main": "index.js",
+  "files": [
+    "index.js"
+  ],
+  "scripts": {
+    "ava": "ava",
+    "lint": "xo",
+    "xo": "xo",
+    "fix": "xo --fix",
+    "test": "npm run xo && npm run ava",
+    "test-ci": "c8 ava"
+  },
+  "dependencies": {
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "ava": "^7.0.0",
+    "c8": "^11.0.0",
+    "xo": "^2.0.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "xo": {
+    "space": 2,
+    "rules": {
+      "capitalized-comments": "off",
+      "require-unicode-regexp": "off",
+      "unicorn/prevent-abbreviations": "off"
+    }
+  }
+}
