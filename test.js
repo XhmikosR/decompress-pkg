@@ -143,6 +143,26 @@ test('skip file with unsupported encoding', async t => {
   t.deepEqual(files, []);
 });
 
+test('skip file with negative offset', async t => {
+  const xml = xar(`<file><name>bad.txt</name><type>file</type>${dataXml(4, {offset: -1})}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, Buffer.alloc(4)));
+  t.deepEqual(files, []);
+});
+
+test('skip file when offset+length exceeds buffer', async t => {
+  const xml = xar(`<file><name>bad.txt</name><type>file</type>${dataXml(999)}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, Buffer.alloc(4)));
+  t.deepEqual(files, []);
+});
+
+test('extract zero-length gzip file', async t => {
+  const xml = xar(`<file><name>empty.txt</name><type>file</type>${dataXml(0, {encoding: 'application/x-gzip'})}</file>`);
+  const files = await decompressPkg()(await makeXar(xml));
+  t.is(files.length, 1);
+  t.is(files[0].path, 'empty.txt');
+  t.is(files[0].data.length, 0);
+});
+
 test('use epoch date for invalid mtime', async t => {
   const content = Buffer.from('x');
   const xml = xar(`<file><name>test.txt</name><type>file</type><mtime>not-a-date</mtime>${dataXml(content.length)}</file>`);

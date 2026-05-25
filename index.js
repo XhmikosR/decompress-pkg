@@ -51,17 +51,35 @@ function toMode(value) {
   return Number.isFinite(parsed) ? parsed : 0o755;
 }
 
-async function getFileData(node, heapStart, input) {
-  const dataNode = node.data?.[0];
+function parseDataNode(dataNode) {
   const offset = Number(dataNode?.offset?.[0] ?? 0);
   const length = Number(dataNode?.length?.[0] ?? 0);
   const encoding = dataNode?.encoding?.[0]?.$?.style ?? 'application/octet-stream';
 
-  if (!Number.isFinite(length) || length < 0) {
+  if (!Number.isFinite(offset) || offset < 0 || !Number.isFinite(length) || length < 0) {
     return null;
   }
 
+  return {offset, length, encoding};
+}
+
+async function getFileData(node, heapStart, input) {
+  const info = parseDataNode(node.data?.[0]);
+  if (info === null) {
+    return null;
+  }
+
+  const {offset, length, encoding} = info;
   const start = heapStart + offset;
+
+  if (start + length > input.length) {
+    return null;
+  }
+
+  if (length === 0) {
+    return Buffer.alloc(0);
+  }
+
   const compressedContent = input.subarray(start, start + length);
 
   if (encoding === 'application/x-gzip') {
