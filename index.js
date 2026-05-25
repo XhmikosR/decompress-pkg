@@ -6,6 +6,28 @@ import {parseStringPromise} from 'xml2js';
 
 const inflate = promisify(zlib.inflate);
 
+function getFirstChild(node, name) {
+  if (!node || typeof node !== 'object') {
+    return undefined;
+  }
+
+  const arr = node[name];
+  if (!Array.isArray(arr) || arr.length === 0) {
+    return undefined;
+  }
+
+  return arr[0];
+}
+
+function getFirstAttr(node, name, attr) {
+  const child = getFirstChild(node, name);
+  if (!child || typeof child !== 'object' || !child.$) {
+    return undefined;
+  }
+
+  return child.$[attr];
+}
+
 // XAR header layout (28 bytes):
 //   0-3  magic "xar!"
 //   4-5  header size (uint16 BE)
@@ -38,7 +60,12 @@ async function parseToc(input, header) {
   const tocBuffer = await inflate(tocCompressed);
   const parsed = await parseStringPromise(tocBuffer.toString());
 
-  return parsed.xar?.toc?.[0];
+  // parsed.xar is the root element - xml2js does NOT wrap the root in an array.
+  if (!parsed || !parsed.xar) {
+    return undefined;
+  }
+
+  return getFirstChild(parsed.xar, 'toc');
 }
 
 function toDate(value) {
@@ -47,14 +74,18 @@ function toDate(value) {
 }
 
 function toMode(value) {
-  const parsed = typeof value === 'string' ? Number.parseInt(value, 8) : Number(value);
+  if (typeof value !== 'string' || value.length === 0) {
+    return 0o755;
+  }
+
+  const parsed = Number.parseInt(value, 8);
   return Number.isFinite(parsed) ? parsed : 0o755;
 }
 
 function parseDataNode(dataNode) {
-  const offset = Number(dataNode?.offset?.[0] ?? 0);
-  const length = Number(dataNode?.length?.[0] ?? 0);
-  const encoding = dataNode?.encoding?.[0]?.$?.style ?? 'application/octet-stream';
+  const offset = Number(getFirstChild(dataNode, 'offset') ?? 0);
+  const length = Number(getFirstChild(dataNode, 'length') ?? 0);
+  const encoding = getFirstAttr(dataNode, 'encoding', 'style') ?? 'application/octet-stream';
 
   if (!Number.isFinite(offset) || offset < 0 || !Number.isFinite(length) || length < 0) {
     return null;
@@ -64,7 +95,7 @@ function parseDataNode(dataNode) {
 }
 
 async function getFileData(node, heapStart, input) {
-  const info = parseDataNode(node.data?.[0]);
+  const info = parseDataNode(getFirstChild(node, 'data'));
   if (info === null) {
     return null;
   }
@@ -95,24 +126,27 @@ async function getFileData(node, heapStart, input) {
 }
 
 async function processNode(node, heapStart, input, parentPath) {
-  const rawName = node.name?.[0] ?? '';
+  if (!node || typeof node !== 'object') {
+    return [];
+  }
+
+  const rawName = getFirstChild(node, 'name');
   // Split on both separators so "..\\evil" can't bypass the .. filter on Windows.
-  const name = rawName.split(/[/\\]/).filter(p => p && p !== '..').join('/');
+  const name = typeof rawName === 'string'
+    ? rawName.split(/[/\\]/).filter(p => p && p !== '..').join('/')
+    : '';
   const currentPath = path.posix.join(parentPath, name);
-  const type = node.type?.[0];
+  const type = getFirstChild(node, 'type');
 
   if (type === 'directory') {
     const entry = {
       data: Buffer.alloc(0),
-      mode: toMode(node.mode?.[0]),
-      mtime: toDate(node.mtime?.[0]),
+      mode: toMode(getFirstChild(node, 'mode')),
+      mtime: toDate(getFirstChild(node, 'mtime')),
       path: `${currentPath}/`,
       type: 'directory',
     };
-    const children = node.file
-      ? await collectPkgEntries(node.file, heapStart, input, currentPath)
-      : [];
-
+    const children = await collectPkgEntries(node.file, heapStart, input, currentPath);
     return [entry, ...children];
   }
 
@@ -128,14 +162,18 @@ async function processNode(node, heapStart, input, parentPath) {
 
   return [{
     data,
-    mode: toMode(node.mode?.[0]),
-    mtime: toDate(node.mtime?.[0]),
+    mode: toMode(getFirstChild(node, 'mode')),
+    mtime: toDate(getFirstChild(node, 'mtime')),
     path: currentPath,
     type: 'file',
   }];
 }
 
-async function collectPkgEntries(fileNodes = [], heapStart, input, parentPath = '') {
+async function collectPkgEntries(fileNodes, heapStart, input, parentPath = '') {
+  if (!Array.isArray(fileNodes)) {
+    return [];
+  }
+
   const nodePromises = fileNodes.map(node => processNode(node, heapStart, input, parentPath));
   const results = await Promise.all(nodePromises);
   return results.flat();
@@ -153,7 +191,7 @@ function decompressPkg() {
     }
 
     const toc = await parseToc(input, header);
-    if (!toc || !toc.file) {
+    if (!toc || typeof toc !== 'object') {
       return [];
     }
 

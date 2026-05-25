@@ -87,6 +87,11 @@ test('return empty array for XAR with empty TOC', async t => {
   t.deepEqual(files, []);
 });
 
+test('return empty array for XAR whose TOC has children but no file entries', async t => {
+  const files = await decompressPkg()(await makeXar(xar('<creation-time>2026-01-01</creation-time>')));
+  t.deepEqual(files, []);
+});
+
 test('extract directory entry', async t => {
   const xml = xar(`
     <file>
@@ -206,6 +211,21 @@ test('extract file with no data element defaults to empty buffer', async t => {
   t.is(files.length, 1);
   t.is(files[0].path, 'empty.txt');
   t.is(files[0].data.length, 0);
+});
+
+test('handle name element containing nested XML without crashing', async t => {
+  // <name> with child elements parses as an object, not a string.
+  const xml = xar(`<file><name><x/></name><type>file</type>${dataXml(0)}</file>`);
+  const files = await decompressPkg()(await makeXar(xml));
+  t.is(files.length, 1);
+  t.is(files[0].path, '.');
+});
+
+test('skip file entry whose body is text content instead of elements', async t => {
+  // <file>plain text</file> parses as a string, not an object.
+  const xml = xar('<file>plain text</file>');
+  const files = await decompressPkg()(await makeXar(xml));
+  t.deepEqual(files, []);
 });
 
 test('skip hardlink entries', async t => {
