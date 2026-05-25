@@ -2,21 +2,35 @@ import {Buffer} from 'node:buffer';
 import path from 'node:path';
 import {promisify} from 'node:util';
 import zlib from 'node:zlib';
-import {parseStringPromise} from 'xml2js';
+import {XMLParser} from 'fast-xml-parser';
 
 const inflate = promisify(zlib.inflate);
+
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '',
+  attributesGroupName: '$',
+  // parseTagValue: false keeps "0755" a string so toMode can parse it as octal
+  parseTagValue: false,
+  parseAttributeValue: false,
+  // processEntities: false blocks entity-expansion DoS via attacker-controlled TOCs
+  processEntities: false,
+  trimValues: true,
+  // single-child toc elements otherwise collapse to scalars
+  isArray: name => name === 'toc' || name === 'file' || name === 'data' || name === 'encoding',
+});
 
 function getFirstChild(node, name) {
   if (!node || typeof node !== 'object') {
     return undefined;
   }
 
-  const arr = node[name];
-  if (!Array.isArray(arr) || arr.length === 0) {
-    return undefined;
+  const value = node[name];
+  if (Array.isArray(value)) {
+    return value.length === 0 ? undefined : value[0];
   }
 
-  return arr[0];
+  return value;
 }
 
 function getFirstAttr(node, name, attr) {
@@ -58,9 +72,8 @@ async function parseToc(input, header) {
   const tocEnd = tocStart + header.tocLengthCompressed;
   const tocCompressed = input.subarray(tocStart, tocEnd);
   const tocBuffer = await inflate(tocCompressed);
-  const parsed = await parseStringPromise(tocBuffer.toString());
+  const parsed = xmlParser.parse(tocBuffer.toString());
 
-  // parsed.xar is the root element - xml2js does NOT wrap the root in an array.
   if (!parsed || !parsed.xar) {
     return undefined;
   }
