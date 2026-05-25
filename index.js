@@ -5,19 +5,29 @@ import zlib from 'node:zlib';
 import {parseStringPromise} from 'xml2js';
 
 const inflate = promisify(zlib.inflate);
-const gunzip = promisify(zlib.gunzip);
 
+// XAR header layout (28 bytes):
+//   0-3  magic "xar!"
+//   4-5  header size (uint16 BE)
+//   6-7  version (uint16 BE) - always 1
+//   8-15 TOC length compressed (uint64 BE)
+//   16-23 TOC length uncompressed (uint64 BE)
+//   24-27 checksum algorithm (uint32 BE)
 function readHeader(buffer) {
   if (buffer.length < 28 || buffer.subarray(0, 4).toString() !== 'xar!') {
     return null;
   }
 
+  const headerSize = buffer.readUInt16BE(4);
+  // const version = buffer.readUInt16BE(6);
+  const tocLengthCompressed = Number(buffer.readBigUInt64BE(8));
+  // const tocLengthUncompressed = Number(buffer.readBigUInt64BE(16));
+  const checksumAlgorithm = buffer.readUInt32BE(24);
+
   return {
-    headerSize: buffer.readUInt16BE(4),
-    version: buffer.readUInt16BE(6),
-    tocLengthCompressed: Number(buffer.readBigUInt64BE(8)),
-    tocLengthUncompressed: Number(buffer.readBigUInt64BE(16)),
-    checksumAlgorithm: buffer.readUInt32BE(24),
+    headerSize,
+    tocLengthCompressed,
+    checksumAlgorithm,
   };
 }
 
@@ -55,7 +65,8 @@ async function getFileData(node, heapStart, input) {
   const compressedContent = input.subarray(start, start + length);
 
   if (encoding === 'application/x-gzip') {
-    return gunzip(compressedContent);
+    // XAR stores zlib (deflate) despite the "gzip" MIME name
+    return inflate(compressedContent);
   }
 
   if (encoding === 'application/octet-stream') {
@@ -65,9 +76,7 @@ async function getFileData(node, heapStart, input) {
   return null;
 }
 
-async function processNode(node, header, input, parentPath) {
-  // Heap starts after: header + compressed TOC + TOC checksum (20 bytes for SHA1)
-  const heapStart = header.headerSize + header.tocLengthCompressed + 20;
+async function processNode(node, heapStart, input, parentPath) {
   const name = node.name?.[0] ?? '';
   const currentPath = path.posix.join(parentPath, name);
   const type = node.type?.[0];
@@ -81,7 +90,7 @@ async function processNode(node, header, input, parentPath) {
       type: 'directory',
     };
     const children = node.file
-      ? await collectPkgEntries(node.file, header, input, currentPath)
+      ? await collectPkgEntries(node.file, heapStart, input, currentPath)
       : [];
 
     return [entry, ...children];
@@ -101,8 +110,8 @@ async function processNode(node, header, input, parentPath) {
   }];
 }
 
-async function collectPkgEntries(fileNodes = [], header, input, parentPath = '') {
-  const nodePromises = fileNodes.map(node => processNode(node, header, input, parentPath));
+async function collectPkgEntries(fileNodes = [], heapStart, input, parentPath = '') {
+  const nodePromises = fileNodes.map(node => processNode(node, heapStart, input, parentPath));
   const results = await Promise.all(nodePromises);
   return results.flat();
 }
@@ -123,7 +132,11 @@ function decompressPkg() {
       return [];
     }
 
-    return collectPkgEntries(toc.file, header, input);
+    // File offsets in the TOC are relative to the raw heap start;
+    // checksum/signature bytes are already accounted for in those offsets.
+    const heapStart = header.headerSize + header.tocLengthCompressed;
+
+    return collectPkgEntries(toc.file, heapStart, input);
   };
 }
 

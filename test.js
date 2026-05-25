@@ -27,3 +27,13 @@ test('mtime is deterministic across multiple extractions', async t => {
 
   t.deepEqual(first[0].mtime, second[0].mtime);
 });
+
+test('extract signed pkg with checksum + RSA signature block before file data', async t => {
+  const buf = await fs.readFile(path.join(__dirname, 'fixtures/signed.pkg'));
+  const files = await decompressPkg()(buf);
+
+  t.is(files.length, 1);
+  t.is(files[0].path, 'test.txt');
+  t.is(files[0].data.toString(), 'signed-test');
+});
+
