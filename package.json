@@ -3,13 +3,15 @@
   "version": "0.1.0",
   "description": "macOS .pkg (XAR) archive decompress plugin",
   "keywords": [
+    "cpio",
     "decompress",
     "decompressplugin",
     "extract",
-    "pkg",
-    "xar",
+    "installer",
     "macos",
-    "installer"
+    "payload",
+    "pkg",
+    "xar"
   ],
   "homepage": "https://github.com/XhmikosR/decompress-pkg#readme",
   "bugs": {
@@ -27,6 +29,7 @@
   },
   "main": "index.js",
   "files": [
+    "cpio.js",
     "index.js"
   ],
   "scripts": {

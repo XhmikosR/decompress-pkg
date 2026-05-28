@@ -3,8 +3,10 @@ import path from 'node:path';
 import {promisify} from 'node:util';
 import zlib from 'node:zlib';
 import {XMLParser} from 'fast-xml-parser';
+import {parseCpio} from './cpio.js';
 
 const inflate = promisify(zlib.inflate);
+const gunzip = promisify(zlib.gunzip);
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -192,6 +194,75 @@ async function collectPkgEntries(fileNodes, heapStart, input, parentPath = '') {
   return results.flat();
 }
 
+function sanitizeCpioPath(name) {
+  // Splitting on both separators stops `..\\evil` from bypassing the `..` filter on Windows.
+  return name.split(/[/\\]/).filter(p => p && p !== '.' && p !== '..').join('/');
+}
+
+function cpioEntryToFile(entry, parentPath) {
+  const safeName = sanitizeCpioPath(entry.name);
+  if (!safeName) {
+    return null;
+  }
+
+  // AppleDouble sidecars (`._file`) are macOS resource forks, not real files.
+  const basename = safeName.slice(safeName.lastIndexOf('/') + 1);
+  if (basename.startsWith('._')) {
+    return null;
+  }
+
+  const mtime = new Date((Number.isFinite(entry.mtime) ? entry.mtime : 0) * 1000);
+  const fullPath = parentPath ? `${parentPath}/${safeName}` : safeName;
+
+  if (entry.isDirectory) {
+    return {
+      data: Buffer.alloc(0),
+      mode: entry.permissions || 0o755,
+      mtime,
+      path: `${fullPath}/`,
+      type: 'directory',
+    };
+  }
+
+  if (entry.isFile) {
+    return {
+      // Detach the slice from the gunzipped buffer so the parent can be released.
+      data: Buffer.from(entry.data),
+      mode: entry.permissions || 0o644,
+      mtime,
+      path: fullPath,
+      type: 'file',
+    };
+  }
+
+  // Skip symlinks, fifos, character/block devices.
+  return null;
+}
+
+const PAYLOAD_PATH = /(?:^|\/)Payload$/;
+
+async function unpackPayload(payloadEntry) {
+  let cpioBuffer;
+  try {
+    cpioBuffer = await gunzip(payloadEntry.data);
+  } catch {
+    return null;
+  }
+
+  const cpioEntries = parseCpio(cpioBuffer);
+  if (!cpioEntries) {
+    return null;
+  }
+
+  // Component pkgs nest payloads as `Foo.pkg/Payload`; rebase under that parent.
+  const parent = path.posix.dirname(payloadEntry.path);
+  const parentPath = parent === '.' ? '' : parent;
+
+  return cpioEntries
+    .map(entry => cpioEntryToFile(entry, parentPath))
+    .filter(file => file !== null);
+}
+
 function decompressPkg() {
   return async input => {
     if (!Buffer.isBuffer(input)) {
@@ -211,8 +282,20 @@ function decompressPkg() {
     // File offsets in the TOC are relative to the raw heap start;
     // checksum/signature bytes are already accounted for in those offsets.
     const heapStart = header.headerSize + header.tocLengthCompressed;
+    const entries = await collectPkgEntries(toc.file, heapStart, input);
 
-    return collectPkgEntries(toc.file, heapStart, input);
+    const expanded = await Promise.all(entries.map(async entry => {
+      if (entry.type === 'file' && PAYLOAD_PATH.test(entry.path)) {
+        const unpacked = await unpackPayload(entry);
+        if (unpacked) {
+          return unpacked;
+        }
+      }
+
+      return [entry];
+    }));
+
+    return expanded.flat();
   };
 }
 
