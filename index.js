@@ -99,6 +99,15 @@ function toMode(value) {
   return Number.isFinite(parsed) ? parsed : 0o755;
 }
 
+function nodeMetadata(node, filePath) {
+  return {
+    data: Buffer.alloc(0),
+    mode: toMode(getFirstChild(node, 'mode')),
+    mtime: toDate(getFirstChild(node, 'mtime')),
+    path: filePath,
+  };
+}
+
 function parseDataNode(dataNode) {
   const offset = Number(getFirstChild(dataNode, 'offset') ?? 0);
   const length = Number(getFirstChild(dataNode, 'length') ?? 0);
@@ -179,13 +188,7 @@ async function processNode(node, heapStart, input, parentPath) {
   const type = getFirstChild(node, 'type');
 
   if (type === 'directory') {
-    const entry = {
-      data: Buffer.alloc(0),
-      mode: toMode(getFirstChild(node, 'mode')),
-      mtime: toDate(getFirstChild(node, 'mtime')),
-      path: `${currentPath}/`,
-      type: 'directory',
-    };
+    const entry = {...nodeMetadata(node, `${currentPath}/`), type: 'directory'};
     const children = await collectPkgEntries(node.file, heapStart, input, currentPath);
     return [entry, ...children];
   }
@@ -200,13 +203,7 @@ async function processNode(node, heapStart, input, parentPath) {
     return [];
   }
 
-  return [{
-    data,
-    mode: toMode(getFirstChild(node, 'mode')),
-    mtime: toDate(getFirstChild(node, 'mtime')),
-    path: currentPath,
-    type: 'file',
-  }];
+  return [{...nodeMetadata(node, currentPath), data, type: 'file'}];
 }
 
 async function collectPkgEntries(fileNodes, heapStart, input, parentPath = '') {
