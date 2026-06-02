@@ -5,7 +5,7 @@ import zlib from 'node:zlib';
 import {XMLParser} from 'fast-xml-parser';
 import {parseCpio} from './cpio.js';
 
-const inflate = promisify(zlib.inflate);
+const unzip = promisify(zlib.unzip);
 const gunzip = promisify(zlib.gunzip);
 
 const xmlParser = new XMLParser({
@@ -73,7 +73,7 @@ async function parseToc(input, header) {
   const tocStart = header.headerSize;
   const tocEnd = tocStart + header.tocLengthCompressed;
   const tocCompressed = input.subarray(tocStart, tocEnd);
-  const tocBuffer = await inflate(tocCompressed);
+  const tocBuffer = await unzip(tocCompressed);
   const parsed = xmlParser.parse(tocBuffer.toString());
 
   if (!parsed || !parsed.xar) {
@@ -129,8 +129,9 @@ async function getFileData(node, heapStart, input) {
   const compressedContent = input.subarray(start, start + length);
 
   if (encoding === 'application/x-gzip') {
-    // XAR stores zlib (deflate) despite the "gzip" MIME name
-    return inflate(compressedContent);
+    // unzip auto-detects zlib (RFC 1950) vs gzip (RFC 1952); Apple's xar writes
+    // zlib despite the "x-gzip" MIME label, but third-party tools may write real gzip.
+    return unzip(compressedContent);
   }
 
   if (encoding === 'application/octet-stream') {
