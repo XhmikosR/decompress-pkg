@@ -57,6 +57,11 @@ function readHeader(buffer) {
     return null;
   }
 
+  const version = buffer.readUInt16BE(6);
+  if (version !== 1) {
+    return null;
+  }
+
   const headerSize = buffer.readUInt16BE(4);
   const tocLengthCompressed = Number(buffer.readBigUInt64BE(8));
 
