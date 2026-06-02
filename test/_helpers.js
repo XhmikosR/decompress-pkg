@@ -79,14 +79,15 @@ export function xar(body) {
   return `<xar><toc>${body}</toc></xar>`;
 }
 
-export function dataXml(length, {offset = 0, encoding = 'application/octet-stream'} = {}) {
-  return `
-  <data>
+export function dataXml(length, {offset = 0, encoding = 'application/octet-stream', size, archivedChecksum, extractedChecksum} = {}) {
+  return `<data>
     <offset>${offset}</offset>
     <length>${length}</length>
+    ${size === undefined ? '' : `<size>${size}</size>`}
+    ${archivedChecksum ? `<archived-checksum style="${archivedChecksum.style}">${archivedChecksum.hash}</archived-checksum>` : ''}
+    ${extractedChecksum ? `<extracted-checksum style="${extractedChecksum.style}">${extractedChecksum.hash}</extracted-checksum>` : ''}
     <encoding style="${encoding}"/>
-  </data>
-  `;
+  </data>`;
 }
 
 export async function pkgWithPayload(payloadBytes, payloadPath = 'Payload') {
