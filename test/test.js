@@ -125,10 +125,9 @@ test('extract file with octet-stream encoding', async t => {
   t.is(files[0].data.toString(), 'raw');
 });
 
-test('skip file with unsupported encoding', async t => {
+test('throw for unsupported encoding', async t => {
   const xml = xar(`<file><name>bad.bin</name><type>file</type>${dataXml(4, {encoding: 'application/x-bzip2'})}</file>`);
-  const files = await decompressPkg()(await makeXar(xml, Buffer.alloc(4)));
-  t.deepEqual(files, []);
+  await t.throwsAsync(decompressPkg()(await makeXar(xml, Buffer.alloc(4))), {instanceOf: Error, message: /unsupported encoding/});
 });
 
 test('skip file with negative offset', async t => {
