@@ -146,7 +146,7 @@ async function getFileData(node, heapStart, input) {
   } else if (encoding === 'application/octet-stream') {
     decompressed = compressedContent;
   } else {
-    return null;
+    throw new Error(`unsupported encoding: ${encoding}`);
   }
 
   if (size >= 0 && decompressed.length !== size) {
