@@ -31,7 +31,8 @@
   "files": [
     "checksum.js",
     "cpio.js",
-    "index.js"
+    "index.js",
+    "xar.js"
   ],
   "scripts": {
     "ava": "ava",
