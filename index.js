@@ -19,8 +19,8 @@ const xmlParser = new XMLParser({
   // processEntities: false blocks entity-expansion DoS via attacker-controlled TOCs
   processEntities: false,
   trimValues: true,
-  // single-child toc elements otherwise collapse to scalars
-  isArray: name => name === 'toc' || name === 'file' || name === 'data' || name === 'encoding',
+  // <file> can appear multiple times; force array so a single child doesn't collapse to a scalar
+  isArray: name => name === 'file',
 });
 
 function getFirstChild(node, name) {
