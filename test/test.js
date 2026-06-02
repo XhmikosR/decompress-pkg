@@ -345,6 +345,16 @@ test('leave Payload entry intact when unpacked content is shorter than a cpio he
   t.is(files[0].path, 'Payload');
 });
 
+test('return empty array when Payload cpio has no extractable entries', async t => {
+  // buildCpioOdc([]) produces a cpio with only the TRAILER record. parseCpio
+  // returns [] (not null), so unpackPayload returns []. The check must be
+  // !== null rather than truthy so null (parse failure) and [] (valid but
+  // empty) are handled differently.
+  const cpio = buildCpioOdc([]);
+  const files = await decompressPkg()(await pkgWithPayload(cpio));
+  t.deepEqual(files, []);
+});
+
 test('preserve sibling metadata files alongside unpacked Payload', async t => {
   // Mirror a real .pkg layout: PackageInfo + Payload at the top level.
   const cpio = buildCpioOdc([{name: './hugo', mode: 0o10_0755, data: Buffer.from('x')}]);

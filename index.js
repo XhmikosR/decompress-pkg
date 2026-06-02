@@ -307,7 +307,7 @@ function decompressPkg() {
     const expanded = await Promise.all(entries.map(async entry => {
       if (entry.type === 'file' && PAYLOAD_PATH.test(entry.path)) {
         const unpacked = await unpackPayload(entry);
-        if (unpacked) {
+        if (unpacked !== null) {
           return unpacked;
         }
       }
