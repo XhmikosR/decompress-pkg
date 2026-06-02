@@ -60,6 +60,15 @@ test('return empty array for buffer with wrong magic bytes', async t => {
   t.deepEqual(files, []);
 });
 
+test('return empty array for XAR with unsupported version', async t => {
+  const buf = Buffer.alloc(28);
+  buf.write('xar!', 0, 'ascii');
+  buf.writeUInt16BE(28, 4); // header size
+  buf.writeUInt16BE(2, 6); // version 2, not supported
+  const files = await decompressPkg()(buf);
+  t.deepEqual(files, []);
+});
+
 test('return empty array for XAR with non-standard TOC structure', async t => {
   const files = await decompressPkg()(await makeXar('<root/>'));
   t.deepEqual(files, []);
