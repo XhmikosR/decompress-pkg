@@ -29,6 +29,7 @@
   },
   "main": "index.js",
   "files": [
+    "checksum.js",
     "cpio.js",
     "index.js"
   ],

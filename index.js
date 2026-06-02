@@ -4,6 +4,7 @@ import {promisify} from 'node:util';
 import zlib from 'node:zlib';
 import {XMLParser} from 'fast-xml-parser';
 import {parseCpio} from './cpio.js';
+import {parseChecksum, validateChecksum} from './checksum.js';
 
 const unzip = promisify(zlib.unzip);
 const gunzip = promisify(zlib.gunzip);
@@ -57,15 +58,11 @@ function readHeader(buffer) {
   }
 
   const headerSize = buffer.readUInt16BE(4);
-  // const version = buffer.readUInt16BE(6);
   const tocLengthCompressed = Number(buffer.readBigUInt64BE(8));
-  // const tocLengthUncompressed = Number(buffer.readBigUInt64BE(16));
-  const checksumAlgorithm = buffer.readUInt32BE(24);
 
   return {
     headerSize,
     tocLengthCompressed,
-    checksumAlgorithm,
   };
 }
 
@@ -106,7 +103,16 @@ function parseDataNode(dataNode) {
     return null;
   }
 
-  return {offset, length, encoding};
+  const size = Number(getFirstChild(dataNode, 'size'));
+
+  return {
+    offset,
+    length,
+    size: Number.isFinite(size) && size >= 0 ? size : -1,
+    encoding,
+    archivedChecksum: parseChecksum(getFirstChild(dataNode, 'archived-checksum')),
+    extractedChecksum: parseChecksum(getFirstChild(dataNode, 'extracted-checksum')),
+  };
 }
 
 async function getFileData(node, heapStart, input) {
@@ -115,7 +121,7 @@ async function getFileData(node, heapStart, input) {
     return null;
   }
 
-  const {offset, length, encoding} = info;
+  const {offset, length, size, encoding, archivedChecksum, extractedChecksum} = info;
   const start = heapStart + offset;
 
   if (start + length > input.length) {
@@ -128,17 +134,30 @@ async function getFileData(node, heapStart, input) {
 
   const compressedContent = input.subarray(start, start + length);
 
+  if (archivedChecksum) {
+    validateChecksum(compressedContent, archivedChecksum, 'archived-checksum');
+  }
+
+  let decompressed;
   if (encoding === 'application/x-gzip') {
     // unzip auto-detects zlib (RFC 1950) vs gzip (RFC 1952); Apple's xar writes
     // zlib despite the "x-gzip" MIME label, but third-party tools may write real gzip.
-    return unzip(compressedContent);
+    decompressed = await unzip(compressedContent);
+  } else if (encoding === 'application/octet-stream') {
+    decompressed = compressedContent;
+  } else {
+    return null;
   }
 
-  if (encoding === 'application/octet-stream') {
-    return compressedContent;
+  if (size >= 0 && decompressed.length !== size) {
+    throw new Error(`size mismatch at heap offset ${offset}: expected ${size} bytes, got ${decompressed.length}`);
   }
 
-  return null;
+  if (extractedChecksum) {
+    validateChecksum(decompressed, extractedChecksum, 'extracted-checksum');
+  }
+
+  return decompressed;
 }
 
 async function processNode(node, heapStart, input, parentPath) {
