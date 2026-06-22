@@ -41,7 +41,7 @@
     "test-ci": "c8 ava"
   },
   "dependencies": {
-    "fast-xml-parser": "^5.8.0"
+    "fast-xml-parser": "^5.9.3"
   },
   "devDependencies": {
     "ava": "^7.0.0",
