@@ -19,7 +19,7 @@ const xmlParser = new XMLParser({
   processEntities: false,
   trimValues: true,
   // single-child toc elements otherwise collapse to scalars
-  isArray: name => name === 'toc' || name === 'file' || name === 'data' || name === 'encoding',
+  isArray: name => ['toc', 'file', 'data', 'encoding'].includes(name),
 });
 
 function getFirstChild(node, name) {
