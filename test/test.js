@@ -1,4 +1,5 @@
 import {Buffer} from 'node:buffer';
+import crypto from 'node:crypto';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -56,6 +57,15 @@ test('throw TypeError for non-Buffer input', async t => {
 
 test('return empty array for buffer with wrong magic bytes', async t => {
   const files = await decompressPkg()(Buffer.alloc(28));
+  t.deepEqual(files, []);
+});
+
+test('return empty array for XAR with unsupported version', async t => {
+  const buf = Buffer.alloc(28);
+  buf.write('xar!', 0, 'ascii');
+  buf.writeUInt16BE(28, 4); // header size
+  buf.writeUInt16BE(2, 6); // version 2, not supported
+  const files = await decompressPkg()(buf);
   t.deepEqual(files, []);
 });
 
@@ -124,10 +134,9 @@ test('extract file with octet-stream encoding', async t => {
   t.is(files[0].data.toString(), 'raw');
 });
 
-test('skip file with unsupported encoding', async t => {
+test('throw for unsupported encoding', async t => {
   const xml = xar(`<file><name>bad.bin</name><type>file</type>${dataXml(4, {encoding: 'application/x-bzip2'})}</file>`);
-  const files = await decompressPkg()(await makeXar(xml, Buffer.alloc(4)));
-  t.deepEqual(files, []);
+  await t.throwsAsync(decompressPkg()(await makeXar(xml, Buffer.alloc(4))), {instanceOf: Error, message: /unsupported encoding/});
 });
 
 test('skip file with negative offset', async t => {
@@ -344,6 +353,16 @@ test('leave Payload entry intact when unpacked content is shorter than a cpio he
   t.is(files[0].path, 'Payload');
 });
 
+test('return empty array when Payload cpio has no extractable entries', async t => {
+  // buildCpioOdc([]) produces a cpio with only the TRAILER record. parseCpio
+  // returns [] (not null), so unpackPayload returns []. The check must be
+  // !== null rather than truthy so null (parse failure) and [] (valid but
+  // empty) are handled differently.
+  const cpio = buildCpioOdc([]);
+  const files = await decompressPkg()(await pkgWithPayload(cpio));
+  t.deepEqual(files, []);
+});
+
 test('preserve sibling metadata files alongside unpacked Payload', async t => {
   // Mirror a real .pkg layout: PackageInfo + Payload at the top level.
   const cpio = buildCpioOdc([{name: './hugo', mode: 0o10_0755, data: Buffer.from('x')}]);
@@ -403,6 +422,79 @@ test('parseCpio: rejects newc entry with namesize=0', t => {
   const hex = (value, length) => value.toString(16).padStart(length, '0');
   const header = '070701' + hex(0, 8).repeat(12) + hex(0, 8);
   t.is(parseCpio(Buffer.from(header, 'binary')), null);
+});
+
+// --- <size> field validation ---
+
+test('throw when <size> does not match decompressed length', async t => {
+  const content = Buffer.from('hello');
+  const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {size: 999})}</file>`);
+  await t.throwsAsync(decompressPkg()(await makeXar(xml, content)), {instanceOf: Error});
+});
+
+test('extract file when <size> matches decompressed length', async t => {
+  const content = Buffer.from('hello');
+  const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {size: content.length})}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, content));
+  t.is(files[0].data.toString(), 'hello');
+});
+
+// --- <archived-checksum> validation ---
+
+test('throw when archived-checksum does not match', async t => {
+  const content = Buffer.from('hello');
+  const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {
+    archivedChecksum: {style: 'sha1', hash: '0000000000000000000000000000000000000000'},
+  })}</file>`);
+  await t.throwsAsync(decompressPkg()(await makeXar(xml, content)), {instanceOf: Error});
+});
+
+test('extract file when archived-checksum matches', async t => {
+  const content = Buffer.from('hello');
+  const hash = crypto.createHash('sha1').update(content).digest('hex');
+  const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {
+    archivedChecksum: {style: 'sha1', hash},
+  })}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, content));
+  t.is(files[0].data.toString(), 'hello');
+});
+
+// --- <extracted-checksum> validation ---
+
+test('throw when extracted-checksum does not match', async t => {
+  const content = Buffer.from('hello');
+  const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {
+    extractedChecksum: {style: 'sha1', hash: '0000000000000000000000000000000000000000'},
+  })}</file>`);
+  await t.throwsAsync(decompressPkg()(await makeXar(xml, content)), {instanceOf: Error});
+});
+
+test('extract file when extracted-checksum matches (sha256)', async t => {
+  const content = Buffer.from('hello');
+  const hash = crypto.createHash('sha256').update(content).digest('hex');
+  const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {
+    extractedChecksum: {style: 'sha256', hash},
+  })}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, content));
+  t.is(files[0].data.toString(), 'hello');
+});
+
+test('skip validation for unknown checksum algorithm', async t => {
+  const content = Buffer.from('hello');
+  const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {
+    archivedChecksum: {style: 'xxhash128', hash: 'aabbccdd'},
+  })}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, content));
+  t.is(files[0].data.toString(), 'hello');
+});
+
+test('skip validation when checksum style is "none"', async t => {
+  const content = Buffer.from('hello');
+  const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {
+    archivedChecksum: {style: 'none', hash: 'ignored'},
+  })}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, content));
+  t.is(files[0].data.toString(), 'hello');
 });
 
 test('parseCpio: rejects odc with corrupted second entry magic', t => {

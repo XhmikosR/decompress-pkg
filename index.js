@@ -2,86 +2,17 @@ import {Buffer} from 'node:buffer';
 import path from 'node:path';
 import {promisify} from 'node:util';
 import zlib from 'node:zlib';
-import {XMLParser} from 'fast-xml-parser';
+import {validateChecksum} from './checksum.js';
 import {parseCpio} from './cpio.js';
+import {
+  getFirstChild,
+  parseDataNode,
+  parseToc,
+  readHeader,
+} from './xar.js';
 
-const inflate = promisify(zlib.inflate);
+const unzip = promisify(zlib.unzip);
 const gunzip = promisify(zlib.gunzip);
-
-const xmlParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: '',
-  attributesGroupName: '$',
-  // parseTagValue: false keeps "0755" a string so toMode can parse it as octal
-  parseTagValue: false,
-  parseAttributeValue: false,
-  // processEntities: false blocks entity-expansion DoS via attacker-controlled TOCs
-  processEntities: false,
-  trimValues: true,
-  // single-child toc elements otherwise collapse to scalars
-  isArray: name => ['toc', 'file', 'data', 'encoding'].includes(name),
-});
-
-function getFirstChild(node, name) {
-  if (!node || typeof node !== 'object') {
-    return undefined;
-  }
-
-  const value = node[name];
-  if (Array.isArray(value)) {
-    return value.length === 0 ? undefined : value[0];
-  }
-
-  return value;
-}
-
-function getFirstAttr(node, name, attr) {
-  const child = getFirstChild(node, name);
-  if (!child || typeof child !== 'object' || !child.$) {
-    return undefined;
-  }
-
-  return child.$[attr];
-}
-
-// XAR header layout (28 bytes):
-//   0-3  magic "xar!"
-//   4-5  header size (uint16 BE)
-//   6-7  version (uint16 BE) - always 1
-//   8-15 TOC length compressed (uint64 BE)
-//   16-23 TOC length uncompressed (uint64 BE)
-//   24-27 checksum algorithm (uint32 BE)
-function readHeader(buffer) {
-  if (buffer.length < 28 || buffer.subarray(0, 4).toString() !== 'xar!') {
-    return null;
-  }
-
-  const headerSize = buffer.readUInt16BE(4);
-  // const version = buffer.readUInt16BE(6);
-  const tocLengthCompressed = Number(buffer.readBigUInt64BE(8));
-  // const tocLengthUncompressed = Number(buffer.readBigUInt64BE(16));
-  const checksumAlgorithm = buffer.readUInt32BE(24);
-
-  return {
-    headerSize,
-    tocLengthCompressed,
-    checksumAlgorithm,
-  };
-}
-
-async function parseToc(input, header) {
-  const tocStart = header.headerSize;
-  const tocEnd = tocStart + header.tocLengthCompressed;
-  const tocCompressed = input.subarray(tocStart, tocEnd);
-  const tocBuffer = await inflate(tocCompressed);
-  const parsed = xmlParser.parse(tocBuffer.toString());
-
-  if (!parsed || !parsed.xar) {
-    return undefined;
-  }
-
-  return getFirstChild(parsed.xar, 'toc');
-}
 
 function toDate(value) {
   const date = value ? new Date(value) : new Date(0);
@@ -97,16 +28,13 @@ function toMode(value) {
   return Number.isFinite(parsed) ? parsed : 0o755;
 }
 
-function parseDataNode(dataNode) {
-  const offset = Number(getFirstChild(dataNode, 'offset') ?? 0);
-  const length = Number(getFirstChild(dataNode, 'length') ?? 0);
-  const encoding = getFirstAttr(dataNode, 'encoding', 'style') ?? 'application/octet-stream';
-
-  if (!Number.isFinite(offset) || offset < 0 || !Number.isFinite(length) || length < 0) {
-    return null;
-  }
-
-  return {offset, length, encoding};
+function nodeMetadata(node, filePath) {
+  return {
+    data: Buffer.alloc(0),
+    mode: toMode(getFirstChild(node, 'mode')),
+    mtime: toDate(getFirstChild(node, 'mtime')),
+    path: filePath,
+  };
 }
 
 async function getFileData(node, heapStart, input) {
@@ -115,7 +43,7 @@ async function getFileData(node, heapStart, input) {
     return null;
   }
 
-  const {offset, length, encoding} = info;
+  const {offset, length, size, encoding, archivedChecksum, extractedChecksum} = info;
   const start = heapStart + offset;
 
   if (start + length > input.length) {
@@ -128,16 +56,30 @@ async function getFileData(node, heapStart, input) {
 
   const compressedContent = input.subarray(start, start + length);
 
+  if (archivedChecksum) {
+    validateChecksum(compressedContent, archivedChecksum, 'archived-checksum');
+  }
+
+  let decompressed;
   if (encoding === 'application/x-gzip') {
-    // XAR stores zlib (deflate) despite the "gzip" MIME name
-    return inflate(compressedContent);
+    // unzip auto-detects zlib (RFC 1950) vs gzip (RFC 1952); Apple's xar writes
+    // zlib despite the "x-gzip" MIME label, but third-party tools may write real gzip.
+    decompressed = await unzip(compressedContent);
+  } else if (encoding === 'application/octet-stream') {
+    decompressed = compressedContent;
+  } else {
+    throw new Error(`unsupported encoding: ${encoding}`);
   }
 
-  if (encoding === 'application/octet-stream') {
-    return compressedContent;
+  if (size >= 0 && decompressed.length !== size) {
+    throw new Error(`size mismatch at heap offset ${offset}: expected ${size} bytes, got ${decompressed.length}`);
   }
 
-  return null;
+  if (extractedChecksum) {
+    validateChecksum(decompressed, extractedChecksum, 'extracted-checksum');
+  }
+
+  return decompressed;
 }
 
 async function processNode(node, heapStart, input, parentPath) {
@@ -154,13 +96,7 @@ async function processNode(node, heapStart, input, parentPath) {
   const type = getFirstChild(node, 'type');
 
   if (type === 'directory') {
-    const entry = {
-      data: Buffer.alloc(0),
-      mode: toMode(getFirstChild(node, 'mode')),
-      mtime: toDate(getFirstChild(node, 'mtime')),
-      path: `${currentPath}/`,
-      type: 'directory',
-    };
+    const entry = {...nodeMetadata(node, `${currentPath}/`), type: 'directory'};
     const children = await collectPkgEntries(node.file, heapStart, input, currentPath);
     return [entry, ...children];
   }
@@ -175,13 +111,7 @@ async function processNode(node, heapStart, input, parentPath) {
     return [];
   }
 
-  return [{
-    data,
-    mode: toMode(getFirstChild(node, 'mode')),
-    mtime: toDate(getFirstChild(node, 'mtime')),
-    path: currentPath,
-    type: 'file',
-  }];
+  return [{...nodeMetadata(node, currentPath), data, type: 'file'}];
 }
 
 async function collectPkgEntries(fileNodes, heapStart, input, parentPath = '') {
@@ -287,7 +217,7 @@ function decompressPkg() {
     const expanded = await Promise.all(entries.map(async entry => {
       if (entry.type === 'file' && PAYLOAD_PATH.test(entry.path)) {
         const unpacked = await unpackPayload(entry);
-        if (unpacked) {
+        if (unpacked !== null) {
           return unpacked;
         }
       }
