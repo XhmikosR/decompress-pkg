@@ -88,7 +88,7 @@ async function processNode(node, heapStart, input, parentPath) {
   }
 
   const rawName = getFirstChild(node, 'name');
-  // Split on both separators so "..\\evil" can't bypass the .. filter on Windows.
+  // Split on both separators so "..\evil" can't bypass the ".." filter on Windows.
   const name = typeof rawName === 'string'
     ? rawName.split(/[/\\]/).filter(p => p && p !== '..').join('/')
     : '';
@@ -125,7 +125,7 @@ async function collectPkgEntries(fileNodes, heapStart, input, parentPath = '') {
 }
 
 function sanitizeCpioPath(name) {
-  // Splitting on both separators stops `..\\evil` from bypassing the `..` filter on Windows.
+  // Split on both separators so "..\evil" can't bypass the ".." filter on Windows.
   return name.split(/[/\\]/).filter(p => p && p !== '.' && p !== '..').join('/');
 }
 

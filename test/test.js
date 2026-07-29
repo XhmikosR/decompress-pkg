@@ -205,7 +205,7 @@ test('extract file with no data element defaults to empty buffer', async t => {
 });
 
 test('handle name element containing nested XML without crashing', async t => {
-  // <name> with child elements parses as an object, not a string.
+  // <name> with child elements parses as an object, not a string
   const xml = xar(`<file><name><x/></name><type>file</type>${dataXml(0)}</file>`);
   const files = await decompressPkg()(await makeXar(xml));
   t.is(files.length, 1);
@@ -213,7 +213,7 @@ test('handle name element containing nested XML without crashing', async t => {
 });
 
 test('skip file entry whose body is text content instead of elements', async t => {
-  // <file>plain text</file> parses as a string, not an object.
+  // <file>plain text</file> parses as a string, not an object
   const xml = xar('<file>plain text</file>');
   const files = await decompressPkg()(await makeXar(xml));
   t.deepEqual(files, []);
@@ -286,7 +286,7 @@ test('skip cpio root directory entry', async t => {
 });
 
 test('unpack nested cpio directory entry', async t => {
-  // The root "." gets filtered (it sanitizes to empty), but a real subdir survives.
+  // The root "." gets filtered (it sanitizes to empty), but a real subdir survives
   const cpio = buildCpioOdc([
     {name: './bin', mode: 0o04_0755},
     {name: './bin/hugo', mode: 0o10_0755, data: Buffer.from('x')},
@@ -345,7 +345,7 @@ test('leave Payload entry intact when gunzip succeeds but content is not cpio', 
 });
 
 test('leave Payload entry intact when unpacked content is shorter than a cpio header', async t => {
-  // Exercises parseCpio's <6-byte short-buffer guard.
+  // Exercises parseCpio's <6-byte short-buffer guard
   const short = await gzip(Buffer.from('xx'));
   const xml = xar(`<file><name>Payload</name><type>file</type>${dataXml(short.length)}</file>`);
   const files = await decompressPkg()(await makeXar(xml, short));
@@ -354,17 +354,15 @@ test('leave Payload entry intact when unpacked content is shorter than a cpio he
 });
 
 test('return empty array when Payload cpio has no extractable entries', async t => {
-  // buildCpioOdc([]) produces a cpio with only the TRAILER record. parseCpio
-  // returns [] (not null), so unpackPayload returns []. The check must be
-  // !== null rather than truthy so null (parse failure) and [] (valid but
-  // empty) are handled differently.
+  // buildCpioOdc([]) is TRAILER-only, so parseCpio returns [] rather than null:
+  // a valid parse with nothing to extract, not a parse failure
   const cpio = buildCpioOdc([]);
   const files = await decompressPkg()(await pkgWithPayload(cpio));
   t.deepEqual(files, []);
 });
 
 test('preserve sibling metadata files alongside unpacked Payload', async t => {
-  // Mirror a real .pkg layout: PackageInfo + Payload at the top level.
+  // Mirror a real .pkg layout: PackageInfo + Payload at the top level
   const cpio = buildCpioOdc([{name: './hugo', mode: 0o10_0755, data: Buffer.from('x')}]);
   const compressed = await gzip(cpio);
   const packageInfo = Buffer.from('<pkg-info/>');
@@ -394,7 +392,7 @@ test('parseCpio: rejects non-Buffer input', t => {
 });
 
 test('parseCpio: rejects odc entry claiming more data than buffer holds', t => {
-  // Valid 76-byte odc header but filesize claims 9999 bytes that don't exist.
+  // Valid 76-byte odc header but filesize claims 9999 bytes that don't exist
   const oct = (value, length) => value.toString(8).padStart(length, '0');
   const header = '070707' + oct(0, 6).repeat(7) + oct(0, 11) + oct(2, 6) + oct(9999, 11);
   const name = 'x\0';
@@ -402,11 +400,11 @@ test('parseCpio: rejects odc entry claiming more data than buffer holds', t => {
 });
 
 test('parseCpio: rejects newc entry claiming more data than buffer holds', t => {
-  // newc header is 110 bytes: magic(6) + 13 fields x 8 bytes. Field order:
-  //  ino, mode, uid, gid, nlink, mtime, filesize, devmajor, devminor,
-  //  rdevmajor, rdevminor, namesize, check.
+  // newc header is 110 bytes: magic(6) + 13 fields x 8 bytes, in order:
+  // ino, mode, uid, gid, nlink, mtime, filesize, devmajor, devminor,
+  // rdevmajor, rdevminor, namesize, check
   const hex = (value, length) => value.toString(16).padStart(length, '0');
-  // 6 leading zero fields + filesize=9999 + 4 zero fields + namesize=2 + check=0.
+  // 6 leading zero fields + filesize=9999 + 4 zero fields + namesize=2 + check=0
   const header = '070701' + hex(0, 8).repeat(6) + hex(9999, 8) + hex(0, 8).repeat(4) + hex(2, 8) + hex(0, 8);
   const namePadded = 'x\0\0\0'; // name + NUL + 2 bytes pad to 4-byte boundary
   t.is(parseCpio(Buffer.from(header + namePadded, 'binary')), null);
@@ -424,8 +422,6 @@ test('parseCpio: rejects newc entry with namesize=0', t => {
   t.is(parseCpio(Buffer.from(header, 'binary')), null);
 });
 
-// --- <size> field validation ---
-
 test('throw when <size> does not match decompressed length', async t => {
   const content = Buffer.from('hello');
   const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {size: 999})}</file>`);
@@ -438,8 +434,6 @@ test('extract file when <size> matches decompressed length', async t => {
   const files = await decompressPkg()(await makeXar(xml, content));
   t.is(files[0].data.toString(), 'hello');
 });
-
-// --- <archived-checksum> validation ---
 
 test('throw when archived-checksum does not match', async t => {
   const content = Buffer.from('hello');
@@ -458,8 +452,6 @@ test('extract file when archived-checksum matches', async t => {
   const files = await decompressPkg()(await makeXar(xml, content));
   t.is(files[0].data.toString(), 'hello');
 });
-
-// --- <extracted-checksum> validation ---
 
 test('throw when extracted-checksum does not match', async t => {
   const content = Buffer.from('hello');
@@ -498,8 +490,7 @@ test('skip validation when checksum style is "none"', async t => {
 });
 
 test('parseCpio: rejects odc with corrupted second entry magic', t => {
-  // Build a valid one-entry archive, then replace the trailer with 76 bytes of garbage
-  // so the second loop iteration encounters a bad magic.
+  // Replace the trailer with garbage so the second loop iteration hits a bad magic
   const valid = buildCpioOdc([{name: './a', mode: 0o10_0644, data: Buffer.from('x')}]);
   const firstEntrySize = 76 + 4 + 1; // header + './a\0' + data
   const garbage = Buffer.alloc(76, 0x41); // 76 bytes of 'A'
@@ -515,14 +506,14 @@ test('parseCpio: rejects newc with corrupted second entry magic', t => {
 });
 
 test('cpio file with permissions=0 defaults to 0o644 mode', async t => {
-  // S_IFREG with no permission bits set.
+  // S_IFREG with no permission bits set
   const cpio = buildCpioOdc([{name: './bin', mode: 0o10_0000, data: Buffer.from('x')}]);
   const files = await decompressPkg()(await pkgWithPayload(cpio));
   t.is(files.find(f => f.path === 'bin').mode, 0o644);
 });
 
 test('cpio directory with permissions=0 defaults to 0o755 mode', async t => {
-  // S_IFDIR with no permission bits set.
+  // S_IFDIR with no permission bits set
   const cpio = buildCpioOdc([
     {name: './dir', mode: 0o04_0000},
     {name: './dir/x', mode: 0o10_0644, data: Buffer.from('x')},
