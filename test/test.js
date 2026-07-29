@@ -70,6 +70,25 @@ test('return empty array for XAR with unsupported version', async t => {
   t.deepEqual(files, []);
 });
 
+test('return empty array for XAR whose TOC runs past the end of the buffer', async t => {
+  const buf = Buffer.alloc(XAR.HEADER_SIZE);
+  buf.write(XAR.MAGIC, 0, 'ascii');
+  buf.writeUInt16BE(XAR.HEADER_SIZE, XAR.OFFSET_HEADER_SIZE);
+  buf.writeUInt16BE(XAR.VERSION, XAR.OFFSET_VERSION);
+  buf.writeBigUInt64BE(9999n, XAR.OFFSET_TOC_COMPRESSED); // claims a TOC that isn't there
+  const files = await decompressPkg()(buf);
+  t.deepEqual(files, []);
+});
+
+test('return empty array for XAR whose header size overlaps the header', async t => {
+  const buf = Buffer.alloc(XAR.HEADER_SIZE);
+  buf.write(XAR.MAGIC, 0, 'ascii');
+  buf.writeUInt16BE(XAR.HEADER_SIZE - 1, XAR.OFFSET_HEADER_SIZE);
+  buf.writeUInt16BE(XAR.VERSION, XAR.OFFSET_VERSION);
+  const files = await decompressPkg()(buf);
+  t.deepEqual(files, []);
+});
+
 test('return empty array for XAR with non-standard TOC structure', async t => {
   const files = await decompressPkg()(await makeXar('<root/>'));
   t.deepEqual(files, []);
