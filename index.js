@@ -2,14 +2,14 @@ import {Buffer} from 'node:buffer';
 import path from 'node:path';
 import {promisify} from 'node:util';
 import zlib from 'node:zlib';
-import {validateChecksum} from './checksum.js';
-import {parseCpio} from './cpio.js';
+import {validateChecksum} from './lib/checksum.js';
+import {parseCpio} from './lib/cpio.js';
 import {
   getFirstChild,
   parseDataNode,
   parseToc,
   readHeader,
-} from './xar.js';
+} from './lib/xar.js';
 
 const unzip = promisify(zlib.unzip);
 const gunzip = promisify(zlib.gunzip);

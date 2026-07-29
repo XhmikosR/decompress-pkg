@@ -7,7 +7,7 @@ import {promisify} from 'node:util';
 import zlib from 'node:zlib';
 import test from 'ava';
 import decompressPkg from '../index.js';
-import {parseCpio} from '../cpio.js';
+import {parseCpio} from '../lib/cpio.js';
 import {
   buildCpioOdc,
   buildCpioNewc,

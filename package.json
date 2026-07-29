@@ -29,10 +29,8 @@
   },
   "main": "index.js",
   "files": [
-    "checksum.js",
-    "cpio.js",
-    "index.js",
-    "xar.js"
+    "lib/",
+    "index.js"
   ],
   "scripts": {
     "ava": "ava",
