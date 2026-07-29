@@ -1,32 +1,42 @@
 import {Buffer} from 'node:buffer';
 import {promisify} from 'node:util';
 import zlib from 'node:zlib';
+import {
+  CPIO_TRAILER_NAME,
+  NEWC,
+  ODC,
+  XAR,
+} from '../lib/constants.js';
 
 const deflate = promisify(zlib.deflate);
 const gzip = promisify(zlib.gzip);
+
+function padTo(length, alignment) {
+  return Buffer.alloc((alignment - (length % alignment)) % alignment);
+}
 
 function cpioOdcEntry({name, data = Buffer.alloc(0), mode = 0o10_0644, mtime = 0}) {
   const nameNul = `${name}\0`;
   const formatToOctal = (value, length) => value.toString(8).padStart(length, '0');
   const header = [
-    '070707',
-    formatToOctal(0, 6), // dev
-    formatToOctal(0, 6), // ino
-    formatToOctal(mode, 6),
-    formatToOctal(0, 6), // uid
-    formatToOctal(0, 6), // gid
-    formatToOctal(1, 6), // nlink
-    formatToOctal(0, 6), // rdev
-    formatToOctal(mtime, 11),
-    formatToOctal(nameNul.length, 6),
-    formatToOctal(data.length, 11),
+    ODC.MAGIC,
+    formatToOctal(0, ODC.FIELD_WIDTH), // dev
+    formatToOctal(0, ODC.FIELD_WIDTH), // ino
+    formatToOctal(mode, ODC.FIELD_WIDTH),
+    formatToOctal(0, ODC.FIELD_WIDTH), // uid
+    formatToOctal(0, ODC.FIELD_WIDTH), // gid
+    formatToOctal(1, ODC.FIELD_WIDTH), // nlink
+    formatToOctal(0, ODC.FIELD_WIDTH), // rdev
+    formatToOctal(mtime, ODC.WIDE_FIELD_WIDTH),
+    formatToOctal(nameNul.length, ODC.FIELD_WIDTH),
+    formatToOctal(data.length, ODC.WIDE_FIELD_WIDTH),
   ].join('');
 
   return Buffer.concat([Buffer.from(header, 'binary'), Buffer.from(nameNul, 'binary'), data]);
 }
 
 export function buildCpioOdc(entries) {
-  const trailer = cpioOdcEntry({name: 'TRAILER!!!'});
+  const trailer = cpioOdcEntry({name: CPIO_TRAILER_NAME});
   return Buffer.concat([...entries.map(entry => cpioOdcEntry(entry)), trailer]);
 }
 
@@ -34,43 +44,46 @@ function cpioNewcEntry({name, data = Buffer.alloc(0), mode = 0o10_0644, mtime = 
   const nameNul = `${name}\0`;
   const formatToHex = (value, length) => value.toString(16).padStart(length, '0');
   const header = [
-    '070701',
-    formatToHex(0, 8), // ino
-    formatToHex(mode, 8),
-    formatToHex(0, 8), // uid
-    formatToHex(0, 8), // gid
-    formatToHex(1, 8), // nlink
-    formatToHex(mtime, 8),
-    formatToHex(data.length, 8),
-    formatToHex(0, 8),
-    formatToHex(0, 8),
-    formatToHex(0, 8),
-    formatToHex(0, 8), // devmajor, devminor, rdevmajor, rdevminor
-    formatToHex(nameNul.length, 8),
-    formatToHex(0, 8), // check
+    NEWC.MAGIC_NO_CRC,
+    formatToHex(0, NEWC.FIELD_WIDTH), // ino
+    formatToHex(mode, NEWC.FIELD_WIDTH),
+    formatToHex(0, NEWC.FIELD_WIDTH), // uid
+    formatToHex(0, NEWC.FIELD_WIDTH), // gid
+    formatToHex(1, NEWC.FIELD_WIDTH), // nlink
+    formatToHex(mtime, NEWC.FIELD_WIDTH),
+    formatToHex(data.length, NEWC.FIELD_WIDTH),
+    formatToHex(0, NEWC.FIELD_WIDTH),
+    formatToHex(0, NEWC.FIELD_WIDTH),
+    formatToHex(0, NEWC.FIELD_WIDTH),
+    formatToHex(0, NEWC.FIELD_WIDTH), // devmajor, devminor, rdevmajor, rdevminor
+    formatToHex(nameNul.length, NEWC.FIELD_WIDTH),
+    formatToHex(0, NEWC.FIELD_WIDTH), // check
   ].join('');
   const headerName = Buffer.concat([Buffer.from(header, 'binary'), Buffer.from(nameNul, 'binary')]);
-  const padName = Buffer.alloc((4 - (headerName.length % 4)) % 4);
-  const padData = Buffer.alloc((4 - (data.length % 4)) % 4);
 
-  return Buffer.concat([headerName, padName, data, padData]);
+  return Buffer.concat([
+    headerName,
+    padTo(headerName.length, NEWC.PAD_ALIGNMENT),
+    data,
+    padTo(data.length, NEWC.PAD_ALIGNMENT),
+  ]);
 }
 
 export function buildCpioNewc(entries) {
-  const trailer = cpioNewcEntry({name: 'TRAILER!!!'});
+  const trailer = cpioNewcEntry({name: CPIO_TRAILER_NAME});
   return Buffer.concat([...entries.map(entry => cpioNewcEntry(entry)), trailer]);
 }
 
 export async function makeXar(xml, heap = Buffer.alloc(0)) {
   const toc = await deflate(Buffer.from(xml));
-  const header = Buffer.alloc(28);
+  const header = Buffer.alloc(XAR.HEADER_SIZE);
 
-  header.write('xar!', 0, 'ascii'); // magic
-  header.writeUInt16BE(28, 4); // header size
-  header.writeUInt16BE(1, 6); // version
-  header.writeBigUInt64BE(BigInt(toc.length), 8); // TOC length compressed
-  header.writeBigUInt64BE(BigInt(xml.length), 16); // TOC length uncompressed
-  header.writeUInt32BE(0, 24); // checksum algorithm (none)
+  header.write(XAR.MAGIC, 0, 'ascii');
+  header.writeUInt16BE(XAR.HEADER_SIZE, XAR.OFFSET_HEADER_SIZE);
+  header.writeUInt16BE(XAR.VERSION, XAR.OFFSET_VERSION);
+  header.writeBigUInt64BE(BigInt(toc.length), XAR.OFFSET_TOC_COMPRESSED);
+  header.writeBigUInt64BE(BigInt(xml.length), XAR.OFFSET_TOC_UNCOMPRESSED);
+  header.writeUInt32BE(0, XAR.OFFSET_CHECKSUM_ALGORITHM); // none
 
   return Buffer.concat([header, toc, heap]);
 }

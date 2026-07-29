@@ -7,6 +7,7 @@ import {promisify} from 'node:util';
 import zlib from 'node:zlib';
 import test from 'ava';
 import decompressPkg from '../index.js';
+import {NEWC, ODC, XAR} from '../lib/constants.js';
 import {parseCpio} from '../lib/cpio.js';
 import {
   buildCpioOdc,
@@ -56,15 +57,15 @@ test('throw TypeError for non-Buffer input', async t => {
 });
 
 test('return empty array for buffer with wrong magic bytes', async t => {
-  const files = await decompressPkg()(Buffer.alloc(28));
+  const files = await decompressPkg()(Buffer.alloc(XAR.HEADER_SIZE));
   t.deepEqual(files, []);
 });
 
 test('return empty array for XAR with unsupported version', async t => {
-  const buf = Buffer.alloc(28);
-  buf.write('xar!', 0, 'ascii');
-  buf.writeUInt16BE(28, 4); // header size
-  buf.writeUInt16BE(2, 6); // version 2, not supported
+  const buf = Buffer.alloc(XAR.HEADER_SIZE);
+  buf.write(XAR.MAGIC, 0, 'ascii');
+  buf.writeUInt16BE(XAR.HEADER_SIZE, XAR.OFFSET_HEADER_SIZE);
+  buf.writeUInt16BE(XAR.VERSION + 1, XAR.OFFSET_VERSION); // one past the supported version
   const files = await decompressPkg()(buf);
   t.deepEqual(files, []);
 });
@@ -392,33 +393,38 @@ test('parseCpio: rejects non-Buffer input', t => {
 });
 
 test('parseCpio: rejects odc entry claiming more data than buffer holds', t => {
-  // Valid 76-byte odc header but filesize claims 9999 bytes that don't exist
+  // Valid odc header but filesize claims 9999 bytes that don't exist
   const oct = (value, length) => value.toString(8).padStart(length, '0');
-  const header = '070707' + oct(0, 6).repeat(7) + oct(0, 11) + oct(2, 6) + oct(9999, 11);
+  const header = ODC.MAGIC
+    + oct(0, ODC.FIELD_WIDTH).repeat(7)
+    + oct(0, ODC.WIDE_FIELD_WIDTH)
+    + oct(2, ODC.FIELD_WIDTH)
+    + oct(9999, ODC.WIDE_FIELD_WIDTH);
   const name = 'x\0';
   t.is(parseCpio(Buffer.from(header + name, 'binary')), null);
 });
 
 test('parseCpio: rejects newc entry claiming more data than buffer holds', t => {
-  // newc header is 110 bytes: magic(6) + 13 fields x 8 bytes, in order:
-  // ino, mode, uid, gid, nlink, mtime, filesize, devmajor, devminor,
-  // rdevmajor, rdevminor, namesize, check
+  // newc fields in order: ino, mode, uid, gid, nlink, mtime, filesize,
+  // devmajor, devminor, rdevmajor, rdevminor, namesize, check
   const hex = (value, length) => value.toString(16).padStart(length, '0');
-  // 6 leading zero fields + filesize=9999 + 4 zero fields + namesize=2 + check=0
-  const header = '070701' + hex(0, 8).repeat(6) + hex(9999, 8) + hex(0, 8).repeat(4) + hex(2, 8) + hex(0, 8);
+  const header = NEWC.MAGIC_NO_CRC
+    + hex(0, NEWC.FIELD_WIDTH).repeat(6)
+    + hex(9999, NEWC.FIELD_WIDTH)
+    + hex(0, NEWC.FIELD_WIDTH).repeat(4)
+    + hex(2, NEWC.FIELD_WIDTH)
+    + hex(0, NEWC.FIELD_WIDTH);
   const namePadded = 'x\0\0\0'; // name + NUL + 2 bytes pad to 4-byte boundary
   t.is(parseCpio(Buffer.from(header + namePadded, 'binary')), null);
 });
 
 test('parseCpio: rejects odc entry with namesize=0', t => {
-  const oct = (value, length) => value.toString(8).padStart(length, '0');
-  const header = '070707' + oct(0, 6).repeat(7) + oct(0, 11) + oct(0, 6) + oct(0, 11);
+  const header = ODC.MAGIC + '0'.repeat(ODC.HEADER_SIZE - ODC.MAGIC.length);
   t.is(parseCpio(Buffer.from(header, 'binary')), null);
 });
 
 test('parseCpio: rejects newc entry with namesize=0', t => {
-  const hex = (value, length) => value.toString(16).padStart(length, '0');
-  const header = '070701' + hex(0, 8).repeat(12) + hex(0, 8);
+  const header = NEWC.MAGIC_NO_CRC + '0'.repeat(NEWC.HEADER_SIZE - NEWC.MAGIC_NO_CRC.length);
   t.is(parseCpio(Buffer.from(header, 'binary')), null);
 });
 
@@ -492,16 +498,16 @@ test('skip validation when checksum style is "none"', async t => {
 test('parseCpio: rejects odc with corrupted second entry magic', t => {
   // Replace the trailer with garbage so the second loop iteration hits a bad magic
   const valid = buildCpioOdc([{name: './a', mode: 0o10_0644, data: Buffer.from('x')}]);
-  const firstEntrySize = 76 + 4 + 1; // header + './a\0' + data
-  const garbage = Buffer.alloc(76, 0x41); // 76 bytes of 'A'
+  const firstEntrySize = ODC.HEADER_SIZE + 4 + 1; // header + './a\0' + data
+  const garbage = Buffer.alloc(ODC.HEADER_SIZE, 0x41); // 76 bytes of 'A'
   t.is(parseCpio(Buffer.concat([valid.subarray(0, firstEntrySize), garbage])), null);
 });
 
 test('parseCpio: rejects newc with corrupted second entry magic', t => {
   const valid = buildCpioNewc([{name: './a', mode: 0o10_0644, data: Buffer.from('x')}]);
-  // newc first-entry size: header(110) + name('./a\0' 4) + 2 name-pad + data(1) + 3 data-pad = 120
-  const firstEntrySize = 120;
-  const garbage = Buffer.alloc(110, 0x41);
+  // header + name('./a\0' 4) + 2 name-pad + data(1) + 3 data-pad
+  const firstEntrySize = NEWC.HEADER_SIZE + 4 + 2 + 1 + 3;
+  const garbage = Buffer.alloc(NEWC.HEADER_SIZE, 0x41);
   t.is(parseCpio(Buffer.concat([valid.subarray(0, firstEntrySize), garbage])), null);
 });
 
