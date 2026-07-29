@@ -32,7 +32,7 @@ function cpioOdcEntry({name, data = Buffer.alloc(0), mode = 0o10_0644, mtime = 0
     formatToOctal(data.length, ODC.WIDE_FIELD_WIDTH),
   ].join('');
 
-  return Buffer.concat([Buffer.from(header, 'binary'), Buffer.from(nameNul, 'binary'), data]);
+  return Buffer.concat([Buffer.from(header, 'latin1'), Buffer.from(nameNul, 'latin1'), data]);
 }
 
 export function buildCpioOdc(entries) {
@@ -59,7 +59,7 @@ function cpioNewcEntry({name, data = Buffer.alloc(0), mode = 0o10_0644, mtime = 
     formatToHex(nameNul.length, NEWC.FIELD_WIDTH),
     formatToHex(0, NEWC.FIELD_WIDTH), // check
   ].join('');
-  const headerName = Buffer.concat([Buffer.from(header, 'binary'), Buffer.from(nameNul, 'binary')]);
+  const headerName = Buffer.concat([Buffer.from(header, 'latin1'), Buffer.from(nameNul, 'latin1')]);
 
   return Buffer.concat([
     headerName,

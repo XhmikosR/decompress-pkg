@@ -408,7 +408,7 @@ test('parseCpio: rejects odc entry claiming more data than buffer holds', t => {
     + oct(2, ODC.FIELD_WIDTH)
     + oct(9999, ODC.WIDE_FIELD_WIDTH);
   const name = 'x\0';
-  t.is(parseCpio(Buffer.from(header + name, 'binary')), null);
+  t.is(parseCpio(Buffer.from(header + name, 'latin1')), null);
 });
 
 test('parseCpio: rejects newc entry claiming more data than buffer holds', t => {
@@ -422,17 +422,17 @@ test('parseCpio: rejects newc entry claiming more data than buffer holds', t => 
     + hex(2, NEWC.FIELD_WIDTH)
     + hex(0, NEWC.FIELD_WIDTH);
   const namePadded = 'x\0\0\0'; // name + NUL + 2 bytes pad to 4-byte boundary
-  t.is(parseCpio(Buffer.from(header + namePadded, 'binary')), null);
+  t.is(parseCpio(Buffer.from(header + namePadded, 'latin1')), null);
 });
 
 test('parseCpio: rejects odc entry with namesize=0', t => {
   const header = ODC.MAGIC + '0'.repeat(ODC.HEADER_SIZE - ODC.MAGIC.length);
-  t.is(parseCpio(Buffer.from(header, 'binary')), null);
+  t.is(parseCpio(Buffer.from(header, 'latin1')), null);
 });
 
 test('parseCpio: rejects newc entry with namesize=0', t => {
   const header = NEWC.MAGIC_NO_CRC + '0'.repeat(NEWC.HEADER_SIZE - NEWC.MAGIC_NO_CRC.length);
-  t.is(parseCpio(Buffer.from(header, 'binary')), null);
+  t.is(parseCpio(Buffer.from(header, 'latin1')), null);
 });
 
 test('throw when <size> does not match decompressed length', async t => {
