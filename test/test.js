@@ -189,6 +189,13 @@ test('sanitize Windows-style path traversal in entry name', async t => {
   t.is(files[0].path, 'Windows/evil.exe');
 });
 
+test('normalize "." segments in entry name', async t => {
+  const content = Buffer.from('x');
+  const xml = xar(`<file><name>./sub/./file.txt</name><type>file</type>${dataXml(content.length)}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, content));
+  t.is(files[0].path, 'sub/file.txt');
+});
+
 test('extract file with no name element defaults to empty path', async t => {
   const content = Buffer.from('x');
   const xml = xar(`<file><type>file</type>${dataXml(content.length)}</file>`);

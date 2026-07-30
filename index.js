@@ -90,7 +90,7 @@ async function processNode(node, heapStart, input, parentPath) {
   const rawName = getFirstChild(node, 'name');
   // Split on both separators so "..\evil" can't bypass the ".." filter on Windows.
   const name = typeof rawName === 'string'
-    ? rawName.split(/[/\\]/).filter(p => p && p !== '..').join('/')
+    ? rawName.split(/[/\\]/).filter(p => p && p !== '.' && p !== '..').join('/')
     : '';
   const currentPath = path.posix.join(parentPath, name);
   const type = getFirstChild(node, 'type');
