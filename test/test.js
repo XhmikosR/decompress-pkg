@@ -454,6 +454,40 @@ test('parseCpio: rejects newc entry with namesize=0', t => {
   t.is(parseCpio(Buffer.from(header, 'latin1')), null);
 });
 
+test('parseCpio: rejects newc namesize that overflows the 4-byte alignment', t => {
+  // namesize 0xffffff91 makes alignUp(nameEnd, 4) wrap to 0 and the offset never advance
+  const hex = (value, length) => value.toString(16).padStart(length, '0');
+  const header = NEWC.MAGIC_NO_CRC
+    + hex(0, NEWC.FIELD_WIDTH).repeat(6)
+    + hex(0, NEWC.FIELD_WIDTH)
+    + hex(0, NEWC.FIELD_WIDTH).repeat(4)
+    + 'ffffff91'
+    + hex(0, NEWC.FIELD_WIDTH);
+  t.is(parseCpio(Buffer.from(header, 'latin1')), null);
+});
+
+test('parseCpio: rejects newc negative filesize', t => {
+  // parseInt('-0000070', 16) = -112, driving dataEnd back to 0
+  const hex = (value, length) => value.toString(16).padStart(length, '0');
+  const header = NEWC.MAGIC_NO_CRC
+    + hex(0, NEWC.FIELD_WIDTH).repeat(6)
+    + '-0000070'
+    + hex(0, NEWC.FIELD_WIDTH).repeat(4)
+    + hex(2, NEWC.FIELD_WIDTH)
+    + hex(0, NEWC.FIELD_WIDTH);
+  t.is(parseCpio(Buffer.from(header + 'x\0\0\0', 'latin1')), null);
+});
+
+test('parseCpio: rejects odc negative filesize', t => {
+  const oct = (value, length) => value.toString(8).padStart(length, '0');
+  const header = ODC.MAGIC
+    + oct(0, ODC.FIELD_WIDTH).repeat(7)
+    + oct(0, ODC.WIDE_FIELD_WIDTH)
+    + oct(2, ODC.FIELD_WIDTH)
+    + '-0000000070';
+  t.is(parseCpio(Buffer.from(header + 'x\0', 'latin1')), null);
+});
+
 test('throw when <size> does not match decompressed length', async t => {
   const content = Buffer.from('hello');
   const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {size: 999})}</file>`);
