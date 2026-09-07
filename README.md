@@ -29,19 +29,44 @@ await decompress(data, 'output', {
 
 ## API
 
-### decompressPkg()(input)
+### decompressPkg(options?)(input)
 
 Returns a `Promise` that resolves to an array of file objects. Returns an empty array if `input` is not a XAR archive (wrong magic bytes or malformed header).
 
-Throws `TypeError` if `input` is not a `Buffer`.
+Throws `TypeError` if `input` is not a `Buffer`, or if an option is not a positive safe integer.
 
-A `Payload` entry that fails to gunzip, or whose decompressed contents are not a recognized cpio stream, is returned as-is rather than dropped so the plugin stays useful for non-installer XAR files.
+A `Payload` entry that fails to gunzip, or whose decompressed contents are not a recognized cpio stream, is returned as-is rather than dropped so the plugin stays useful for non-installer XAR files. A `Payload` that gunzips correctly but exceeds `maxPayloadSize` throws instead, since returning the opaque blob would look like a successful extraction.
 
 #### input
 
 Type: `Buffer`
 
 Buffer of the `.pkg` file contents.
+
+#### options
+
+Ceilings on how much data zlib may produce, so that a crafted archive cannot inflate a few KB into an out-of-memory crash. Exceeding one throws; the error from a zlib cap has `code: 'ERR_BUFFER_TOO_LARGE'`. The defaults are far above any real `.pkg`, so raise them only for archives you trust.
+
+##### options.maxTocSize
+
+* Type: `number`
+* Default: `67108864` (64 MiB)
+
+Cap on the inflated XAR table of contents. The header's own uncompressed TOC length is used instead when it is smaller. Real TOCs are kilobytes: a `.pkg` keeps its file list in the cpio `Payload`, not here.
+
+##### options.maxFileSize
+
+* Type: `number`
+* Default: `4294967296` (4 GiB)
+
+Cap on a single inflated XAR heap entry. An entry's `<size>` is used instead when it is smaller, and an entry that declares no `<size>` is bounded by this alone.
+
+##### options.maxPayloadSize
+
+* Type: `number`
+* Default: `4294967296` (4 GiB)
+
+Cap on the unpacked cpio `Payload`. Nothing in the archive declares this size up front, so it is the only bound available.
 
 #### file object
 

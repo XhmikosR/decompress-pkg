@@ -501,6 +501,109 @@ test('extract file when <size> matches decompressed length', async t => {
   t.is(files[0].data.toString(), 'hello');
 });
 
+test('throw when a file inflates past its declared <size>', async t => {
+  const compressed = await deflate(Buffer.alloc(10 * 1024 * 1024));
+  const xml = xar(`<file><name>big.bin</name><type>file</type>${dataXml(compressed.length, {
+    encoding: 'application/x-gzip',
+    size: 1024,
+  })}</file>`);
+  await t.throwsAsync(decompressPkg()(await makeXar(xml, compressed)), {code: 'ERR_BUFFER_TOO_LARGE'});
+});
+
+test('extract file whose declared <size> is zero', async t => {
+  // maxOutputLength rejects 0, so a size="0" entry is capped at one byte instead
+  const empty = await deflate(Buffer.alloc(0));
+  const xml = xar(`<file><name>empty.bin</name><type>file</type>${dataXml(empty.length, {
+    encoding: 'application/x-gzip',
+    size: 0,
+  })}</file>`);
+  const files = await decompressPkg()(await makeXar(xml, empty));
+  t.is(files.length, 1);
+  t.is(files[0].data.length, 0);
+});
+
+test('throw when the TOC inflates past its declared length', async t => {
+  const xml = xar('<file><name>a.txt</name><type>file</type></file>');
+  const buf = await makeXar(xml);
+  // Understate the uncompressed TOC length so the cap trips
+  buf.writeBigUInt64BE(1n, XAR.OFFSET_TOC_UNCOMPRESSED);
+  await t.throwsAsync(decompressPkg()(buf), {code: 'ERR_BUFFER_TOO_LARGE'});
+});
+
+test('throw when a file with no <size> inflates past maxFileSize', async t => {
+  const compressed = await deflate(Buffer.alloc(1024 * 1024));
+  const xml = xar(`<file><name>nosize.bin</name><type>file</type>${dataXml(compressed.length, {
+    encoding: 'application/x-gzip',
+  })}</file>`);
+  await t.throwsAsync(
+    decompressPkg({maxFileSize: 1024})(await makeXar(xml, compressed)),
+    {code: 'ERR_BUFFER_TOO_LARGE'},
+  );
+});
+
+test('throw when a declared <size> is itself past maxFileSize', async t => {
+  const compressed = await deflate(Buffer.alloc(1024 * 1024));
+  const xml = xar(`<file><name>big.bin</name><type>file</type>${dataXml(compressed.length, {
+    encoding: 'application/x-gzip',
+    size: 1024 * 1024,
+  })}</file>`);
+  await t.throwsAsync(
+    decompressPkg({maxFileSize: 1024})(await makeXar(xml, compressed)),
+    {code: 'ERR_BUFFER_TOO_LARGE'},
+  );
+});
+
+test('throw when a file declaring <size> zero inflates anyway', async t => {
+  const compressed = await deflate(Buffer.alloc(1024 * 1024));
+  const xml = xar(`<file><name>liar.bin</name><type>file</type>${dataXml(compressed.length, {
+    encoding: 'application/x-gzip',
+    size: 0,
+  })}</file>`);
+  await t.throwsAsync(decompressPkg()(await makeXar(xml, compressed)), {code: 'ERR_BUFFER_TOO_LARGE'});
+});
+
+test('throw when the TOC inflates past a custom maxTocSize', async t => {
+  const xml = xar('<file><name>a.txt</name><type>file</type></file>');
+  await t.throwsAsync(
+    decompressPkg({maxTocSize: 8})(await makeXar(xml)),
+    {code: 'ERR_BUFFER_TOO_LARGE'},
+  );
+});
+
+test('throw when a Payload inflates past maxPayloadSize', async t => {
+  const cpio = buildCpioOdc([{name: 'big.txt', data: Buffer.alloc(64 * 1024)}]);
+  await t.throwsAsync(
+    decompressPkg({maxPayloadSize: 1024})(await pkgWithPayload(cpio)),
+    {message: /maxPayloadSize/},
+  );
+});
+
+test('leave Payload entry intact when gunzip fails for a reason other than the cap', async t => {
+  const raw = Buffer.from('NOPE');
+  const xml = xar(`<file><name>Payload</name><type>file</type>${dataXml(raw.length)}</file>`);
+  const files = await decompressPkg({maxPayloadSize: 1024})(await makeXar(xml, raw));
+  t.is(files.length, 1);
+  t.is(files[0].path, 'Payload');
+});
+
+test('throw TypeError for an invalid limit option', t => {
+  for (const value of [0, -1, 1.5, '1024', Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    t.throws(() => decompressPkg({maxFileSize: value}), {instanceOf: TypeError});
+    t.throws(() => decompressPkg({maxTocSize: value}), {instanceOf: TypeError});
+    t.throws(() => decompressPkg({maxPayloadSize: value}), {instanceOf: TypeError});
+  }
+});
+
+test('accept a missing or empty options object', async t => {
+  const buf = await fs.readFile(path.join(__dirname, 'fixtures/file.pkg'));
+  const plugins = [decompressPkg(), decompressPkg({}), decompressPkg(undefined)];
+  const results = await Promise.all(plugins.map(plugin => plugin(buf)));
+
+  for (const files of results) {
+    t.is(files.length, 1);
+  }
+});
+
 test('throw when archived-checksum does not match', async t => {
   const content = Buffer.from('hello');
   const xml = xar(`<file><name>test.txt</name><type>file</type>${dataXml(content.length, {
